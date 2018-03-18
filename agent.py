@@ -176,7 +176,7 @@ class MCTS(object):
 from model import PolicyValueNet
 
 class Agent_MCTS(nn.Module):
-    def __init__(self,args,share_model,opti,board_max,param,is_selfplay=True):
+    def __init__(self,args,share_model,board_max,param,is_selfplay=True):
         super().__init__()
         self._is_selfplay=is_selfplay
         self.learn_rate = 5e-3
@@ -194,7 +194,8 @@ class Agent_MCTS(nn.Module):
         # num of simulations used for the pure mcts, which is used as the opponent to evaluate the trained policy
         self.pure_mcts_playout_num = 1000  
         
-        self.policy_value_net = PolicyValueNet(board_max,board_max,net_params = param)
+        
+        self.policy_value_net = PolicyValueNet(board_max,board_max,net_params = param,share_model=share_model)
         self.mcts = MCTS(self.policy_value_net.policy_value_fn, self.c_puct, self.n_playout)
         
         
@@ -267,7 +268,7 @@ class Agent_MCTS(nn.Module):
 #        self.main_dqn.eval()
         
     
-    def learn(self,data_buffer):
+    def learn(self,rank,data_buffer):
         """update the policy-value net"""
         mini_batch = random.sample(data_buffer, self.batch_size)
         state_batch = [data[0] for data in mini_batch]
@@ -288,7 +289,7 @@ class Agent_MCTS(nn.Module):
             
         explained_var_old =  1 - np.var(np.array(winner_batch) - old_v.flatten())/np.var(np.array(winner_batch))
         explained_var_new = 1 - np.var(np.array(winner_batch) - new_v.flatten())/np.var(np.array(winner_batch))        
-        print("kl:{:.5f},lr_multiplier:{:.3f},loss:{},entropy:{},explained_var_old:{:.3f},explained_var_new:{:.3f}".format(
-                kl, self.lr_multiplier, loss, entropy, explained_var_old, explained_var_new))
+        print("rank[{}] kl:{:.5f},lr_multiplier:{:.3f},loss:{},entropy:{},explained_var_old:{:.3f},explained_var_new:{:.3f}".format(
+                rank,kl, self.lr_multiplier, loss, entropy, explained_var_old, explained_var_new))
         return loss, entropy
         

@@ -41,10 +41,14 @@ def get_equi_data(play_data,board_height,board_width):
     
     
 def run_process(args,share_model,board_max,n_rows,rank):
+    print(rank)
+    
+    from agent import Agent_MCTS
+    agent = Agent_MCTS(args,share_model,board_max,param='./net_param')
     
     from checkerboard import Checkerboard, BoardRender
     board = Checkerboard(board_max,n_rows)
-    board_render = BoardRender(board_max,render_off=False,inline_draw=True)
+    board_render = BoardRender(board_max,render_off=False,inline_draw=False)
     board_render.clear()
     
     data_buffer = deque(maxlen=100000)
@@ -52,52 +56,56 @@ def run_process(args,share_model,board_max,n_rows,rank):
     Ts =[]
     Trewards =[]
     TQmax = []
-    for episode in range(1000):
-        random.seed(time.time())
-        board.reset()
-        board_render.clear()
-        
-        """ start a self-play game using a MCTS player, reuse the search tree
-        store the self-play data: (state, mcts_probs, z)
-        """
-        p1, p2 = board.players
-        states, mcts_probs, current_players = [], [], []        
-        for step in range(10000):
-            if len(data_buffer) > 32:
-                    loss, entropy = agent.learn(data_buffer)
-#                    print('loss : ',loss,' entropy : ',entropy)
-                    
-            move, move_probs = agent.get_action(board, temp=1.0, return_prob=1)
-            # store the data
-            states.append(board.current_state())
-            mcts_probs.append(move_probs)
-            current_players.append(board.current_player)
-            # perform a move
-            board.step(move)
+    try:
+        for episode in range(1000):
+            random.seed(time.time())
+            board.reset()
+            board_render.clear()
             board_render.draw(board.states)
-            end, winner = board.game_end()
-            if end:
-                # winner from the perspective of the current player of each state
-                winners_z = np.zeros(len(current_players))  
-                if winner != -1:
-                    winners_z[np.array(current_players) == winner] = 1.0
-                    winners_z[np.array(current_players) != winner] = -1.0
-                #reset MCTS root node
-                agent.reset_player() 
-                if winner != -1:
-                    print("Game end. Winner is player:", winner)
-                else:
-                    print("Game end. Tie")
-#                return winner, zip(states, mcts_probs, winners_z)
-                play_data = zip(states, mcts_probs, winners_z)
-                ex_play_data = get_equi_data(play_data,board_max,board_max)
-                data_buffer.extend(ex_play_data)
-                
-                break
-
-        episode += 1
-        
-
+            
+            """ start a self-play game using a MCTS player, reuse the search tree
+            store the self-play data: (state, mcts_probs, z)
+            """
+            p1, p2 = board.players
+            states, mcts_probs, current_players = [], [], []        
+            for step in range(10000):
+                if len(data_buffer) > 32:
+                        loss, entropy = agent.learn(rank,data_buffer)
+    #                    print('loss : ',loss,' entropy : ',entropy)
+                        
+                move, move_probs = agent.get_action(board, temp=1.0, return_prob=1)
+                # store the data
+                states.append(board.current_state())
+                mcts_probs.append(move_probs)
+                current_players.append(board.current_player)
+                # perform a move
+                board.step(move)
+                board_render.draw(board.states)
+                end, winner = board.game_end()
+                if end:
+                    # winner from the perspective of the current player of each state
+                    winners_z = np.zeros(len(current_players))  
+                    if winner != -1:
+                        winners_z[np.array(current_players) == winner] = 1.0
+                        winners_z[np.array(current_players) != winner] = -1.0
+                    #reset MCTS root node
+                    agent.reset_player() 
+                    if winner != -1:
+                        print("Game end. Winner is player:", winner)
+                    else:
+                        print("Game end. Tie")
+    #                return winner, zip(states, mcts_probs, winners_z)
+                    play_data = zip(states, mcts_probs, winners_z)
+                    ex_play_data = get_equi_data(play_data,board_max,board_max)
+                    data_buffer.extend(ex_play_data)
+                    
+                    break
+    
+            episode += 1
+            
+    except:
+        print('except save')
+        agent.save()
 
 
 
@@ -175,20 +183,18 @@ if __name__ == '__main__':
 #        print('load')
 #        B_share_model.load_state_dict(torch.load('B'+args.name))
 #        W_share_model.load_state_dict(torch.load('W'+args.name))
+    from model import Net
     n_rows = 4
-    from agent import Agent_MCTS
-    agent = Agent_MCTS(args,0,0,board_max,param='./net_param')
-    try:
-        run_process(args,agent,board_max,n_rows,999)
-    except:
-        print('except save')
-        agent.save()
-        
-#    num_processes = 8
-#    processes = []
-#    for rank in range(num_processes):
-#        p = mp.Process(target=run_process, args=(args,B_share_model,W_share_model,board_max,rank))
-#        p.start()
-#        processes.append(p)
-#    for p in processes:
-#        p.join()
+    share_model = Net(board_max, board_max)
+    share_model.share_memory()
+    
+#    run_process(args,share_model,board_max,n_rows,999)
+
+    num_processes = 8
+    processes = []
+    for rank in range(num_processes):
+        p = mp.Process(target=run_process, args=(args,share_model,board_max,n_rows,rank))
+        p.start()
+        processes.append(p)
+    for p in processes:
+        p.join()
