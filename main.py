@@ -44,7 +44,7 @@ def run_process(args,share_model,board_max,n_rows,rank):
     
     from checkerboard import Checkerboard, BoardRender
     board = Checkerboard(board_max,n_rows)
-    board_render = BoardRender(board_max,render_off=True,inline_draw=True)
+    board_render = BoardRender(board_max,render_off=False,inline_draw=True)
     board_render.clear()
     
     data_buffer = deque(maxlen=100000)
@@ -167,18 +167,7 @@ if __name__ == '__main__':
     args.memory_capacity = 100000
     args.learn_start = 1
     args.max_episode_length = 100000
-#    args.render = True
     
-    
-    
-    
-#    if args.replay_interval % 2 ==0:
-#        args.replay_interval += 1 
-#    if args.target_update_interval % 2 == 0:
-#        args.target_update_interval += 1
-#    
-
-#    
 #    from model import PV_NET
 #    share_model = PV_NET(args)
 #    share_model.share_memory()

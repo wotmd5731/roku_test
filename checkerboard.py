@@ -36,13 +36,16 @@ class Checkerboard():
         self.availables = list(range(self.max_size * self.max_size))
         self.last_move = -1
         self.n_in_row =n_in_row # need how many pieces in a row to win
-        
+        self.user_count = 0
         
     def reset(self, start_player=0):
         self.states= {}
         self.current_player = self.players[start_player]  # start player        
         self.availables = list(range(self.max_size * self.max_size))
         self.last_move = -1
+        self.user_count = 1
+        self.step(self.max_size*self.max_size//2)
+        
 #        for y in range(self.max_size):
 #            for x in range(self.max_size):
 #                self.board[y][x] = 0
@@ -50,8 +53,8 @@ class Checkerboard():
     
     
     def __repr__(self):
-        return "info  max_size %d " % (self.max_size)
-
+        sss = 'info\n max_size:{0}\n states:{1}\n current_player:{2}\n avail:{3}\n n_row:{4}'.format(self.max_size , self.states, self.current_player, self.availables,self.n_in_row)
+        return sss
     def __str__(self):
 #        for i in reversed(range(self.max_size)):
         for i in range(self.max_size):
@@ -155,14 +158,19 @@ class Checkerboard():
 
 
     def step(self, move):
+        self.user_count+=1
         self.states[move] = self.current_player
         self.availables.remove(move)
         
         self.last_move = move
-        x = int(move%self.max_size)
-        y = int(move/self.max_size)
-
-        self.current_player = self.players[0] if self.current_player == self.players[1] else self.players[1] 
+#        x = int(move%self.max_size)
+#        y = int(move/self.max_size)
+        if self.user_count %4 >=2:
+            self.current_player = self.players[1]
+        else:
+            self.current_player = self.players[0]
+                                               
+#        self.current_player = self.players[0] if self.current_player == self.players[1] else self.players[1] 
 #         = torch.LongTensor(self.board)
 #        rr,dd = self._check_done(x,y,stone)
             
@@ -215,6 +223,8 @@ class BoardRender():
         self.ax.grid(color='black', linestyle='-', linewidth=0.5)
 #        plt.xticks(range(11))
 #        plt.show()
+        plt.pause(0.001) 
+        plt.pause(0.001) 
     def clear(self):
         if self.render_off:return
         self.ax.patches.clear()
@@ -235,9 +245,10 @@ class BoardRender():
         # ipython command 
         if self.inline_draw:
             display(self.fig)
+            print(' ')
         else :
             plt.pause(0.001)            
-        print(' ')
+            plt.pause(0.001) 
         
         pass
     
