@@ -197,7 +197,7 @@ class Agent_MCTS(nn.Module):
         self.pure_mcts_playout_num = 1000  
         
         
-        self.policy_value_net = PolicyValueNet(board_max,board_max,share_model=share_model,use_gpu=False)
+        self.policy_value_net = PolicyValueNet(board_max,board_max,share_model=share_model,use_gpu=args.cuda)
         self.mcts = MCTS(self.policy_value_net.policy_value_fn, self.c_puct, self.n_playout)
         
         
