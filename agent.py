@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import matplotlib.pyplot as plt
 import os
+import datetime
 
 import numpy as np
 import copy 
@@ -176,13 +177,14 @@ class MCTS(object):
 from model import PolicyValueNet
 
 class Agent_MCTS(nn.Module):
-    def __init__(self,args,share_model,board_max,param,is_selfplay=True):
+    def __init__(self,args,share_model,board_max,self_play,shared_lr_mul,shared_g_cnt):
         super().__init__()
-        self._is_selfplay=is_selfplay
+        self.g_cnt = shared_g_cnt
+        self._is_selfplay=self_play
         self.learn_rate = 5e-3
-        self.lr_multiplier = 1.0  # adaptively adjust the learning rate based on KL
+        self.lr_multiplier = shared_lr_mul  # adaptively adjust the learning rate based on KL
         self.temp = 1.0 # the temperature param
-        self.n_playout = 100 # num of simulations for each move
+        self.n_playout = 400 # num of simulations for each move
         self.c_puct = 5
         self.batch_size = 32 # mini-batch size for training
         self.play_batch_size = 1 
@@ -195,7 +197,7 @@ class Agent_MCTS(nn.Module):
         self.pure_mcts_playout_num = 1000  
         
         
-        self.policy_value_net = PolicyValueNet(board_max,board_max,net_params = param,share_model=share_model)
+        self.policy_value_net = PolicyValueNet(board_max,board_max,share_model=share_model,use_gpu=False)
         self.mcts = MCTS(self.policy_value_net.policy_value_fn, self.c_puct, self.n_playout)
         
         
@@ -276,20 +278,27 @@ class Agent_MCTS(nn.Module):
         winner_batch = [data[2] for data in mini_batch]            
         old_probs, old_v = self.policy_value_net.policy_value(state_batch) 
         for i in range(self.epochs): 
-            loss, entropy = self.policy_value_net.train_step(state_batch, mcts_probs_batch, winner_batch, self.learn_rate*self.lr_multiplier)
+            loss, entropy = self.policy_value_net.train_step(state_batch, mcts_probs_batch, winner_batch, self.learn_rate*self.lr_multiplier.value)
             new_probs, new_v = self.policy_value_net.policy_value(state_batch)
             kl = np.mean(np.sum(old_probs * (np.log(old_probs + 1e-10) - np.log(new_probs + 1e-10)), axis=1))  
             if kl > self.kl_targ * 4:   # early stopping if D_KL diverges badly
                 break
         # adaptively adjust the learning rate
-        if kl > self.kl_targ * 2 and self.lr_multiplier > 0.1:
-            self.lr_multiplier /= 1.5
-        elif kl < self.kl_targ / 2 and self.lr_multiplier < 10:
-            self.lr_multiplier *= 1.5
+        if kl > self.kl_targ * 2 and self.lr_multiplier.value > 0.1:
+            self.lr_multiplier.value /= 1.5
+        elif kl < self.kl_targ / 2 and self.lr_multiplier.value < 10:
+            self.lr_multiplier.value *= 1.5
             
         explained_var_old =  1 - np.var(np.array(winner_batch) - old_v.flatten())/np.var(np.array(winner_batch))
-        explained_var_new = 1 - np.var(np.array(winner_batch) - new_v.flatten())/np.var(np.array(winner_batch))        
-        print("rank[{}] kl:{:.5f},lr_multiplier:{:.3f},loss:{},entropy:{},explained_var_old:{:.3f},explained_var_new:{:.3f}".format(
-                rank,kl, self.lr_multiplier, loss, entropy, explained_var_old, explained_var_new))
+        explained_var_new = 1 - np.var(np.array(winner_batch) - new_v.flatten())/np.var(np.array(winner_batch))     
+        
+        
+        ss = "rank:{} c:{} kl:{:.5f},lr_multiplier:{:.3f},loss:{},entropy:{},explained_var_old:{:.3f},explained_var_new:{:.3f}  {} \n".format(
+                rank,self.g_cnt.value,kl, self.lr_multiplier.value, loss, entropy, explained_var_old, explained_var_new,datetime.datetime.now())
+        self.g_cnt.value +=1
+        if self.g_cnt.value%100 == 0:
+            with open('log.txt','a') as f:
+                f.write(ss)
+        print(ss)
         return loss, entropy
         

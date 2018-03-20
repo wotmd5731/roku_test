@@ -1,0 +1,1 @@
+rank:1 c:99 kl:0.01076,lr_multiplier:11.391,loss:5.183845520019531,entropy:3.655968189239502,explained_var_old:0.000,explained_var_new:0.000  2018-03-20 22:46:55.799540 

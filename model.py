@@ -55,27 +55,22 @@ class Net(nn.Module):
 
 class PolicyValueNet():
     """policy-value network """
-    def __init__(self, board_width, board_height, net_params=None, use_gpu=False, share_model=None):        
+    def __init__(self, board_width, board_height, use_gpu=False, share_model=None):        
         self.use_gpu = use_gpu
         self.board_width = board_width
         self.board_height = board_height
         self.l2_const = 1e-4  # coef of l2 penalty 
         # the policy value net module
-        if share_model:
-            self.policy_value_net = share_model
+            
         if self.use_gpu:
-            self.policy_value_net = Net(board_width, board_height).cuda()       
+            self.policy_value_net = share_model.cuda()
+#            self.policy_value_net = Net(board_width, board_height).cuda()       
         else:
-            self.policy_value_net = Net(board_width, board_height)
+            self.policy_value_net = share_model
+#            self.policy_value_net = Net(board_width, board_height)
         self.optimizer = optim.Adam(self.policy_value_net.parameters(), weight_decay=self.l2_const)
 
-        if net_params:
-            try:
-                self.policy_value_net.load_state_dict(torch.load(net_params))
-                print('load')
-            except:
-                print('load fail')
-                pass
+        
 
     def policy_value(self, state_batch):
         """

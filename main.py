@@ -8,6 +8,8 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.autograd import Variable
 import torch.multiprocessing as mp
+from multiprocessing import Value
+
 #import torchvision.transforms as T
 from collections import defaultdict, deque
 import sys
@@ -40,18 +42,57 @@ def get_equi_data(play_data,board_height,board_width):
     return extend_data
     
     
-def run_process(args,share_model,board_max,n_rows,rank):
+def run_process(args,share_model,board_max,n_rows,rank,self_play,shared_lr_mul,shared_g_cnt):
     print(rank)
     
     from agent import Agent_MCTS
-    agent = Agent_MCTS(args,share_model,board_max,param='./net_param')
-    
+    agent = Agent_MCTS(args,share_model,board_max,self_play,shared_lr_mul,shared_g_cnt)
     from checkerboard import Checkerboard, BoardRender
     board = Checkerboard(board_max,n_rows)
     board_render = BoardRender(board_max,render_off=False,inline_draw=False)
     board_render.clear()
     
     data_buffer = deque(maxlen=100000)
+    
+    if not self_play:
+        board.reset()
+        board_render.clear()
+        board_render.draw(board.states)
+        
+        """ start a self-play game using a MCTS player, reuse the search tree
+        store the self-play data: (state, mcts_probs, z)
+        """
+        p1, p2 = board.players
+        player = input('select player 1: balck , 2 : white')
+        if player=='1':
+            play_step = 1
+        else:
+            play_step = 0
+        for step in range(10000):
+            if step//2 %2 == play_step:
+                ss =input('input x,y:')
+                pos = ss.split(',')
+                if pos == 'q' :
+                    return
+                move = int(pos[0])+int(pos[1])*board_max
+                print('movd ',move)
+            else:            
+                move, move_probs = agent.get_action(board, temp=1.0, return_prob=1)
+            board.step(move)
+            board_render.draw(board.states)
+            end, winner = board.game_end()
+            if end:
+                # winner from the perspective of the current player of each state
+                agent.reset_player() 
+                if winner != -1:
+                    print("Game end. Winner is player:", winner)
+                else:
+                    print("Game end. Tie")
+#                return winner, zip(states, mcts_probs, winners_z)
+                return
+    
+    
+    
 
     Ts =[]
     Trewards =[]
@@ -105,7 +146,7 @@ def run_process(args,share_model,board_max,n_rows,rank):
             
     except:
         print('except save')
-        agent.save()
+        if rank==0 :agent.save()
 
 
 
@@ -176,6 +217,8 @@ if __name__ == '__main__':
     args.learn_start = 1
     args.max_episode_length = 100000
     
+    self_play = True
+    
 #    from model import PV_NET
 #    share_model = PV_NET(args)
 #    share_model.share_memory()
@@ -187,13 +230,21 @@ if __name__ == '__main__':
     n_rows = 4
     share_model = Net(board_max, board_max)
     share_model.share_memory()
-    
-#    run_process(args,share_model,board_max,n_rows,999)
+    shared_lr_mul = Value('d',1)
+    shared_g_cnt = Value('i',0)
+    if True:
+        try:
+            share_model.load_state_dict(torch.load('./net_param'))
+            print('load')
+        except:
+            print('load fail')
+            pass    
+#    run_process(args,share_model,board_max,n_rows,0,self_play,shared_lr_mul,shared_g_cnt)
 
-    num_processes = 8
+    num_processes = 3
     processes = []
     for rank in range(num_processes):
-        p = mp.Process(target=run_process, args=(args,share_model,board_max,n_rows,rank))
+        p = mp.Process(target=run_process, args=(args,share_model,board_max,n_rows,rank,self_play,shared_lr_mul,shared_g_cnt))
         p.start()
         processes.append(p)
     for p in processes:
