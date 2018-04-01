@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import torch.multiprocessing as mp
 from multiprocessing import Value , Queue
-
+import datetime
 #import torchvision.transforms as T
 from collections import defaultdict, deque
 import sys
@@ -91,10 +91,10 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
     board_max = args.board_max
     
     from agent import Agent_MCTS
-    agent = Agent_MCTS(args,5,200,share_model,self_play,shared_lr_mul,shared_g_cnt)
+    agent = Agent_MCTS(args,5,200,self_play,shared_lr_mul,shared_g_cnt)
     from checkerboard import Checkerboard, BoardRender
     board = Checkerboard(board_max,args.n_rows)
-    board_render = BoardRender(board_max,render_off=False,inline_draw=False)
+    board_render = BoardRender(board_max,render_off=True,inline_draw=False)
     board_render.clear()
     
     Ts =[]
@@ -102,6 +102,8 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
     Tentropy =[]
     try:
         for episode in range(10000):
+            agent.model_update(share_model)
+            
             random.seed(time.time())
             board.reset()
             board_render.clear()
@@ -159,9 +161,52 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
 
 
 def learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q):
+    from model import PolicyValueNet
+    epochs = 2
+    kl_targ = 0.025
+    lr_multiplier = shared_lr_mul  # adaptively adjust the learning rate based on KL
+    g_cnt = shared_g_cnt
+    learn_rate = args.lr
+    batch_size = args.batch_size # mini-batch size for training
+    policy_value_net = PolicyValueNet(args.board_max,args.board_max,use_gpu=args.cuda)
+    policy_value_net.policy_value_net.load_state_dict(share_model.state_dict())
+    
+    
+    def learn(policy_value_net,rank,data_buffer):
+        """update the policy-value net"""
+        mini_batch = random.sample(data_buffer, batch_size)
+        state_batch = [data[0] for data in mini_batch]
+        mcts_probs_batch = [data[1] for data in mini_batch]
+        winner_batch = [data[2] for data in mini_batch]            
+        old_probs, old_v = policy_value_net.policy_value(state_batch) 
+        for i in range(epochs): 
+            
+            loss, entropy = policy_value_net.train_step(state_batch, mcts_probs_batch, winner_batch, learn_rate*lr_multiplier.value)
+            new_probs, new_v = policy_value_net.policy_value(state_batch)
+            kl = np.mean(np.sum(old_probs * (np.log(old_probs + 1e-10) - np.log(new_probs + 1e-10)), axis=1))  
+            if kl > kl_targ * 4:   # early stopping if D_KL diverges badly
+                break
+        # adaptively adjust the learning rate
+        if kl > kl_targ * 2 and lr_multiplier.value > 0.1:
+            lr_multiplier.value /= 1.5
+        elif kl < kl_targ / 2 and lr_multiplier.value < 10:
+            lr_multiplier.value *= 1.5
+#        explained_var_old =  1 - np.var(np.array(winner_batch) - old_v.flatten())/np.var(np.array(winner_batch))
+#        explained_var_new = 1 - np.var(np.array(winner_batch) - new_v.flatten())/np.var(np.array(winner_batch))     
+#        ss = "rank:{} c:{} kl:{:.5f},lr_multiplier:{:.3f},loss:{},entropy:{},explained_var_old:{:.3f},explained_var_new:{:.3f}  {} ".format(
+#                rank,self.g_cnt.value,kl, self.lr_multiplier.value, loss, entropy, explained_var_old, explained_var_new,datetime.datetime.now())
+        ss = "r:{} c:{} kl:{:.5f},lr_mul:{:.3f},loss:{},ent:{}   {} ".format(
+                rank,g_cnt.value,kl, lr_multiplier.value, loss, entropy, datetime.datetime.now())
+        
+        g_cnt.value +=1
+        if g_cnt.value%100 == 0:
+            with open('log.txt','a') as f:
+                f.write(ss+'\n')
+        print('\r'+ ss,end='',flush=True)
+#        print(ss)
+        return loss, entropy
+    
     print('learner')
-    from agent import Agent_MCTS
-    agent = Agent_MCTS(args,0,0,share_model,True,shared_lr_mul,shared_g_cnt)
 
     data_buffer = deque(maxlen=args.memory_capacity)
     try:
@@ -172,19 +217,19 @@ def learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q):
             
             if len(data_buffer) > args.batch_size:
                 print('learn')
-                loss, entropy = agent.learn(0,data_buffer)
+                loss, entropy = learn(policy_value_net,0,data_buffer)
+                share_model.load_state_dict(policy_value_net.policy_value_net.state_dict())
+                
             if shared_g_cnt.value%1000 ==0:
                 print('leanr_save')
-                agent.save()
+                torch.save(policy_value_net.policy_value_net.state_dict(),'./net_param')
             time.sleep(1)
     #                    list_loss.append(loss)
     #                    list_entropy.append(entropy)
     #                print('loss : ',loss,' entropy : ',entropy)
     except:
+        torch.save(policy_value_net.policy_value_net.state_dict(),'./net_param')
         print('except save')
-        if agent.save():
-            print('save')
-
 
 if __name__ == '__main__':
     
@@ -257,6 +302,7 @@ if __name__ == '__main__':
     
     share_model = Net(args.board_max, args.board_max)
     share_model.share_memory()
+#    share_model.cuda()
     shared_lr_mul = Value('d',1)
     shared_g_cnt = Value('i',1)
     shared_q = Queue(maxsize=10000)
@@ -268,17 +314,15 @@ if __name__ == '__main__':
         print('load fail')
      
     processes = []
-    
-#    p = mp.Process(target=learn_process, args=(args,share_model,shared_lr_mul,shared_g_cnt,shared_q))
-#    p.start()
-#    processes.append(p)
-    
-    num_processes = 5
+
+
+    num_processes = 3
     for rank in range(num_processes):
         p = mp.Process(target=act_process, args=(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,shared_q))
         p.start()
         processes.append(p)
     try:
+#        act_process(args,share_model,0,self_play,shared_lr_mul,shared_g_cnt,shared_q)
         learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q)
     except:
         shared_q.close()

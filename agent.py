@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import matplotlib.pyplot as plt
 import os
-import datetime
+
 import numpy as np
 import copy 
 
@@ -171,24 +171,22 @@ class MCTS(object):
 from model import PolicyValueNet
 
 class Agent_MCTS(nn.Module):
-    def __init__(self,args,c_puct,n_playout,share_model,self_play,shared_lr_mul,shared_g_cnt):
+    def __init__(self,args,c_puct,n_playout,self_play,shared_lr_mul,shared_g_cnt):
         super().__init__()
-        self.g_cnt = shared_g_cnt
+        self.cuda = args.cuda
         self._is_selfplay=self_play
-        self.learn_rate = args.lr
-        self.lr_multiplier = shared_lr_mul  # adaptively adjust the learning rate based on KL
+        
+        
         self.n_playout = n_playout # num of simulations for each move
         self.c_puct = c_puct
-        self.batch_size = args.batch_size # mini-batch size for training
+        
         self.play_batch_size = 1 
-        self.epochs =2 # num of train_steps for each update
-        self.kl_targ = 0.025
         self.check_freq = 50 
         self.game_batch_num = 1500
         # num of simulations used for the pure mcts, which is used as the opponent to evaluate the trained policy
         
         
-        self.policy_value_net = PolicyValueNet(args.board_max,args.board_max,share_model=share_model,use_gpu=args.cuda)
+        self.policy_value_net = PolicyValueNet(args.board_max,args.board_max,use_gpu=args.cuda)
         self.mcts = MCTS(self.policy_value_net.policy_value_fn, self.c_puct, self.n_playout)
         
         
@@ -210,6 +208,12 @@ class Agent_MCTS(nn.Module):
 #        print('save')
         torch.save(self.policy_value_net.policy_value_net.state_dict(),'./net_param')
         return 1
+    def model_update(self,model):
+#        self.policy_value_net.policy_value_net.parameter_update(model)
+        if self.cuda:
+            self.policy_value_net.policy_value_net.load_state_dict(model.state_dict())
+        else:
+            self.policy_value_net.policy_value_net.load_state_dict(model.state_dict())
         
 #    def save(self,path ='./param.p'):
 #        torch.save(self.main_dqn.state_dict(),path)
@@ -254,40 +258,5 @@ class Agent_MCTS(nn.Module):
 #        self.main_dqn.eval()
         
     
-    def learn(self,rank,data_buffer):
-        """update the policy-value net"""
-        mini_batch = random.sample(data_buffer, self.batch_size)
-        state_batch = [data[0] for data in mini_batch]
-        mcts_probs_batch = [data[1] for data in mini_batch]
-        winner_batch = [data[2] for data in mini_batch]            
-        old_probs, old_v = self.policy_value_net.policy_value(state_batch) 
-        for i in range(self.epochs): 
-            loss, entropy = self.policy_value_net.train_step(state_batch, mcts_probs_batch, winner_batch, self.learn_rate*self.lr_multiplier.value)
-            new_probs, new_v = self.policy_value_net.policy_value(state_batch)
-            kl = np.mean(np.sum(old_probs * (np.log(old_probs + 1e-10) - np.log(new_probs + 1e-10)), axis=1))  
-            if kl > self.kl_targ * 4:   # early stopping if D_KL diverges badly
-                break
-        # adaptively adjust the learning rate
-        if kl > self.kl_targ * 2 and self.lr_multiplier.value > 0.1:
-            self.lr_multiplier.value /= 1.5
-        elif kl < self.kl_targ / 2 and self.lr_multiplier.value < 10:
-            self.lr_multiplier.value *= 1.5
-            
-        explained_var_old =  1 - np.var(np.array(winner_batch) - old_v.flatten())/np.var(np.array(winner_batch))
-        explained_var_new = 1 - np.var(np.array(winner_batch) - new_v.flatten())/np.var(np.array(winner_batch))     
-        
-        
-#        ss = "rank:{} c:{} kl:{:.5f},lr_multiplier:{:.3f},loss:{},entropy:{},explained_var_old:{:.3f},explained_var_new:{:.3f}  {} ".format(
-#                rank,self.g_cnt.value,kl, self.lr_multiplier.value, loss, entropy, explained_var_old, explained_var_new,datetime.datetime.now())
-        ss = "r:{} c:{} kl:{:.5f},lr_mul:{:.3f},loss:{},ent:{}   {} ".format(
-                rank,self.g_cnt.value,kl, self.lr_multiplier.value, loss, entropy, datetime.datetime.now())
-        
-        self.g_cnt.value +=1
-        if self.g_cnt.value%100 == 0:
-            with open('log.txt','a') as f:
-                f.write(ss+'\n')
-        print('\r'+ ss,end='',flush=True)
-#        print(ss)
-        
-        return loss, entropy
+    
         

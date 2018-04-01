@@ -63,12 +63,15 @@ class PolicyValueNet():
         self.l2_const = 1e-4  # coef of l2 penalty 
         # the policy value net module
             
-        if self.use_gpu:
-            self.policy_value_net = share_model.cuda()
-#            self.policy_value_net = Net(board_width, board_height).cuda()       
-        else:
+        if share_model :
             self.policy_value_net = share_model
-#            self.policy_value_net = Net(board_width, board_height)
+            
+        elif self.use_gpu:
+#            self.policy_value_net = share_model.cuda()
+            self.policy_value_net = Net(board_width, board_height).cuda()      
+        else:
+#            self.policy_value_net = share_model
+            self.policy_value_net = Net(board_width, board_height)
         self.optimizer = optim.Adam(self.policy_value_net.parameters(), weight_decay=self.l2_const)
 
         
