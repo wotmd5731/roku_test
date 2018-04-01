@@ -10,7 +10,6 @@ from torch.autograd import Variable
 import matplotlib.pyplot as plt
 import os
 import datetime
-
 import numpy as np
 import copy 
 
@@ -177,18 +176,18 @@ class MCTS(object):
 from model import PolicyValueNet
 
 class Agent_MCTS(nn.Module):
-    def __init__(self,args,share_model,board_max,self_play,shared_lr_mul,shared_g_cnt):
+    def __init__(self,args,share_model,self_play,shared_lr_mul,shared_g_cnt):
         super().__init__()
         self.g_cnt = shared_g_cnt
         self._is_selfplay=self_play
-        self.learn_rate = 5e-3
+        self.learn_rate = args.lr
         self.lr_multiplier = shared_lr_mul  # adaptively adjust the learning rate based on KL
         self.temp = 1.0 # the temperature param
-        self.n_playout = 400 # num of simulations for each move
+        self.n_playout = 200 # num of simulations for each move
         self.c_puct = 5
-        self.batch_size = 32 # mini-batch size for training
+        self.batch_size = args.batch_size # mini-batch size for training
         self.play_batch_size = 1 
-        self.epochs = 5 # num of train_steps for each update
+        self.epochs =2 # num of train_steps for each update
         self.kl_targ = 0.025
         self.check_freq = 50 
         self.game_batch_num = 1500
@@ -197,16 +196,9 @@ class Agent_MCTS(nn.Module):
         self.pure_mcts_playout_num = 1000  
         
         
-        self.policy_value_net = PolicyValueNet(board_max,board_max,share_model=share_model,use_gpu=args.cuda)
+        self.policy_value_net = PolicyValueNet(args.board_max,args.board_max,share_model=share_model,use_gpu=args.cuda)
         self.mcts = MCTS(self.policy_value_net.policy_value_fn, self.c_puct, self.n_playout)
         
-        
-        self.batch_size = args.batch_size 
-        self.discount = args.discount
-        self.epsilon = args.epsilon
-        self.action_space = args.action_space
-        self.hidden_size = args.hidden_size
-        self.state_space = args.state_space
         
 #        self.main_dqn= DQN_model(args)
         
@@ -293,12 +285,17 @@ class Agent_MCTS(nn.Module):
         explained_var_new = 1 - np.var(np.array(winner_batch) - new_v.flatten())/np.var(np.array(winner_batch))     
         
         
-        ss = "rank:{} c:{} kl:{:.5f},lr_multiplier:{:.3f},loss:{},entropy:{},explained_var_old:{:.3f},explained_var_new:{:.3f}  {} \n".format(
-                rank,self.g_cnt.value,kl, self.lr_multiplier.value, loss, entropy, explained_var_old, explained_var_new,datetime.datetime.now())
+#        ss = "rank:{} c:{} kl:{:.5f},lr_multiplier:{:.3f},loss:{},entropy:{},explained_var_old:{:.3f},explained_var_new:{:.3f}  {} ".format(
+#                rank,self.g_cnt.value,kl, self.lr_multiplier.value, loss, entropy, explained_var_old, explained_var_new,datetime.datetime.now())
+        ss = "r:{} c:{} kl:{:.5f},lr_mul:{:.3f},loss:{},ent:{}   {} ".format(
+                rank,self.g_cnt.value,kl, self.lr_multiplier.value, loss, entropy, datetime.datetime.now())
+        
         self.g_cnt.value +=1
         if self.g_cnt.value%100 == 0:
             with open('log.txt','a') as f:
-                f.write(ss)
-        print(ss)
+                f.write(ss+'\n')
+        print('\r'+ ss,end='',flush=True)
+#        print(ss)
+        
         return loss, entropy
         
