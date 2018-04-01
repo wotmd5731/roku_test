@@ -48,7 +48,7 @@ def human_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,sha
     board_max = args.board_max
     
     from agent import Agent_MCTS
-    agent = Agent_MCTS(args,share_model,self_play,shared_lr_mul,shared_g_cnt)
+    agent = Agent_MCTS(args,5,800,share_model,self_play,shared_lr_mul,shared_g_cnt)
     from checkerboard import Checkerboard, BoardRender
     board = Checkerboard(board_max,args.n_rows)
     board_render = BoardRender(board_max,render_off=False,inline_draw=False)
@@ -71,7 +71,7 @@ def human_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,sha
             move = int(pos[0])+int(pos[1])*board_max
             print('movd ',move)
         else:            
-            move, move_probs = agent.get_action(board, return_prob=1)
+            move, move_probs = agent.get_action(board)
         board.step(move)
         board_render.draw(board.states)
         end, winner = board.game_end()
@@ -91,17 +91,12 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
     board_max = args.board_max
     
     from agent import Agent_MCTS
-    agent = Agent_MCTS(args,share_model,self_play,shared_lr_mul,shared_g_cnt)
+    agent = Agent_MCTS(args,5,200,share_model,self_play,shared_lr_mul,shared_g_cnt)
     from checkerboard import Checkerboard, BoardRender
     board = Checkerboard(board_max,args.n_rows)
-    board_render = BoardRender(board_max,render_off=True,inline_draw=False)
+    board_render = BoardRender(board_max,render_off=False,inline_draw=False)
     board_render.clear()
     
-    
-    
-    
-    
-
     Ts =[]
     Tloss =[]
     Tentropy =[]
@@ -120,7 +115,7 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
 #            list_loss = []
 #            list_entropy = []
             for step in range(10000):
-                move, move_probs = agent.get_action(board, temp=1.0, return_prob=1)
+                move, move_probs = agent.get_action(board, temp=1.0)
                 # store the data
                 states.append(board.current_state())
                 mcts_probs.append(move_probs)
@@ -130,6 +125,7 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
                 board_render.draw(board.states)
                 end, winner = board.game_end()
                 if end:
+#                    time.sleep(1)
                     # winner from the perspective of the current player of each state
                     winners_z = np.zeros(len(current_players))  
                     if winner != -1:
@@ -138,9 +134,9 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
                     #reset MCTS root node
                     agent.reset_player() 
                     if winner != -1:
-                        print("Game end. Winner is player:", winner)
+                        print("Game end. Winner is player:", winner, 'total_step :',step)
                     else:
-                        print("Game end. Tie")
+                        print("Game end. Tie", 'total_step :',step)
     #                return winner, zip(states, mcts_probs, winners_z)
                     play_data = zip(states, mcts_probs, winners_z)
                     ex_play_data = get_equi_data(play_data,board_max,board_max)
@@ -162,19 +158,32 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
         
 
 
-    def learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q):
-        data_buffer = deque(maxlen=args.memory_capacity)
-        
-        if not shared_q.empty():
-            data_buffer.extend(shared_q.get())
-        
-        if len(data_buffer) > args.batch_size:
-            loss, entropy = agent.learn(rank,data_buffer)
-#                    list_loss.append(loss)
-#                    list_entropy.append(entropy)
-#                print('loss : ',loss,' entropy : ',entropy)
+def learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q):
+    print('learner')
+    from agent import Agent_MCTS
+    agent = Agent_MCTS(args,0,0,share_model,True,shared_lr_mul,shared_g_cnt)
 
-        if rank==0 :agent.save()
+    data_buffer = deque(maxlen=args.memory_capacity)
+    try:
+        while True:      
+            if not shared_q.empty():
+                print('extend')
+                data_buffer.extend(shared_q.get())
+            
+            if len(data_buffer) > args.batch_size:
+                print('learn')
+                loss, entropy = agent.learn(0,data_buffer)
+            if shared_g_cnt.value%1000 ==0:
+                print('leanr_save')
+                agent.save()
+            time.sleep(1)
+    #                    list_loss.append(loss)
+    #                    list_entropy.append(entropy)
+    #                print('loss : ',loss,' entropy : ',entropy)
+    except:
+        print('except save')
+        if agent.save():
+            print('save')
 
 
 if __name__ == '__main__':
@@ -185,9 +194,9 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='DQN')
     parser.add_argument('--name', type=str, default='main_rainbow_multi.p', help='stored name')
-    parser.add_argument('--epsilon', type=float, default=0.05, help='random action select probability')
+#    parser.add_argument('--epsilon', type=float, default=0.05, help='random action select probability')
     #parser.add_argument('--render', type=bool, default=True, help='enable rendering')
-    parser.add_argument('--render', type=bool, default=False, help='enable rendering')
+#    parser.add_argument('--render', type=bool, default=False, help='enable rendering')
     parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
     #parser.add_argument('--game', type=str, default='CartPole-v1', help='gym game')
     #parser.add_argument('--game', type=str, default='Acrobot-v1', help='gym game')
@@ -205,7 +214,7 @@ if __name__ == '__main__':
 #    parser.add_argument('--V-min', type=float, default=-10, metavar='V', help='Minimum of value distribution support')
 #    parser.add_argument('--V-max', type=float, default=10, metavar='V', help='Maximum of value distribution support')
     #parser.add_argument('--model', type=str, metavar='PARAMS', help='Pretrained model (state dict)')
-    parser.add_argument('--memory-capacity', type=int, default=500000, metavar='CAPACITY', help='Experience replay memory capacity')
+    parser.add_argument('--memory-capacity', type=int, default=3000000, metavar='CAPACITY', help='Experience replay memory capacity')
 #    parser.add_argument('--learn-start', type=int, default=1 , metavar='STEPS', help='Number of steps before starting training')
 #    parser.add_argument('--replay-interval', type=int, default=1, metavar='k', help='Frequency of sampling from memory')
 #    parser.add_argument('--priority-exponent', type=float, default=0.5, metavar='ω', help='Prioritised experience replay exponent')
@@ -249,23 +258,35 @@ if __name__ == '__main__':
     share_model = Net(args.board_max, args.board_max)
     share_model.share_memory()
     shared_lr_mul = Value('d',1)
-    shared_g_cnt = Value('i',0)
+    shared_g_cnt = Value('i',1)
     shared_q = Queue(maxsize=10000)
     
-    if True:
-        try:
-            share_model.load_state_dict(torch.load('./net_param'))
-            print('load')
-        except:
-            print('load fail')
-            pass    
-    act_process(args,share_model,0,self_play,shared_lr_mul,shared_g_cnt,shared_q)
-
-#    num_processes = 7
-#    processes = []
-#    for rank in range(num_processes):
-#        p = mp.Process(target=act_process, args=(args,share_model,board_max,n_rows,rank,self_play,shared_lr_mul,shared_g_cnt))
-#        p.start()
-#        processes.append(p)
-#    for p in processes:
-#        p.join()
+    try:
+        share_model.load_state_dict(torch.load('./net_param'))
+        print('load')
+    except:
+        print('load fail')
+     
+    processes = []
+    
+#    p = mp.Process(target=learn_process, args=(args,share_model,shared_lr_mul,shared_g_cnt,shared_q))
+#    p.start()
+#    processes.append(p)
+    
+    num_processes = 5
+    for rank in range(num_processes):
+        p = mp.Process(target=act_process, args=(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,shared_q))
+        p.start()
+        processes.append(p)
+    try:
+        learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q)
+    except:
+        shared_q.close()
+        shared_q.join_thread()
+        for ps in processes:
+            ps.terminate()
+            
+        
+#    human_process(args,share_model,0,self_play,shared_lr_mul,shared_g_cnt,shared_q)
+    
+    

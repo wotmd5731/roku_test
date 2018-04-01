@@ -110,12 +110,7 @@ class MCTS(object):
         """
         
         
-        """
-        now editing
-        state가 board가 들어오는데 
-        _policy(state) 가 어떻게 동작하는지 모르겟음.
-        state 가 board 가 들어오던데...
-        """
+    
         node = self._root
         while(1):            
             if node.is_leaf():
@@ -176,24 +171,21 @@ class MCTS(object):
 from model import PolicyValueNet
 
 class Agent_MCTS(nn.Module):
-    def __init__(self,args,share_model,self_play,shared_lr_mul,shared_g_cnt):
+    def __init__(self,args,c_puct,n_playout,share_model,self_play,shared_lr_mul,shared_g_cnt):
         super().__init__()
         self.g_cnt = shared_g_cnt
         self._is_selfplay=self_play
         self.learn_rate = args.lr
         self.lr_multiplier = shared_lr_mul  # adaptively adjust the learning rate based on KL
-        self.temp = 1.0 # the temperature param
-        self.n_playout = 200 # num of simulations for each move
-        self.c_puct = 5
+        self.n_playout = n_playout # num of simulations for each move
+        self.c_puct = c_puct
         self.batch_size = args.batch_size # mini-batch size for training
         self.play_batch_size = 1 
         self.epochs =2 # num of train_steps for each update
         self.kl_targ = 0.025
         self.check_freq = 50 
         self.game_batch_num = 1500
-        self.best_win_ratio = 0.0
         # num of simulations used for the pure mcts, which is used as the opponent to evaluate the trained policy
-        self.pure_mcts_playout_num = 1000  
         
         
         self.policy_value_net = PolicyValueNet(args.board_max,args.board_max,share_model=share_model,use_gpu=args.cuda)
@@ -215,9 +207,9 @@ class Agent_MCTS(nn.Module):
         self.mcts.update_with_move(-1) 
         
     def save(self):
-        print('save')
+#        print('save')
         torch.save(self.policy_value_net.policy_value_net.state_dict(),'./net_param')
-        
+        return 1
         
 #    def save(self,path ='./param.p'):
 #        torch.save(self.main_dqn.state_dict(),path)
@@ -232,7 +224,7 @@ class Agent_MCTS(nn.Module):
 #        self.target_dqn.parameter_update(self.main_dqn)
     
    
-    def get_action(self, board, temp=1e-3, return_prob=0):
+    def get_action(self, board, temp=1e-3):
         sensible_moves = board.availables
         move_probs = np.zeros(board.width*board.height) # the pi vector returned by MCTS as in the alphaGo Zero paper
         if len(sensible_moves) > 0:
