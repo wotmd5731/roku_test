@@ -8,7 +8,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.autograd import Variable
 import torch.multiprocessing as mp
-from multiprocessing import Value , Queue
+from multiprocessing import Value , Queue, Lock
 import datetime
 #import torchvision.transforms as T
 from collections import defaultdict, deque
@@ -43,15 +43,19 @@ def get_equi_data(play_data,board_height,board_width):
     
     
 
-def human_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,shared_q):
+def human_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,shared_q,lock):
     print('human play')
+    self_play=False
     board_max = args.board_max
-    
     from agent import Agent_MCTS
-    agent = Agent_MCTS(args,5,800,share_model,self_play,shared_lr_mul,shared_g_cnt)
+    agent = Agent_MCTS(args,5,800,self_play,shared_lr_mul,shared_g_cnt)
+    lock.acquire()
+    agent.model_update(share_model)
+    lock.release()
+            
     from checkerboard import Checkerboard, BoardRender
     board = Checkerboard(board_max,args.n_rows)
-    board_render = BoardRender(board_max,render_off=False,inline_draw=False)
+    board_render = BoardRender(board_max,render_off=False,inline_draw=True)
     board.reset()
     board_render.clear()
     board_render.draw(board.states)
@@ -86,12 +90,12 @@ def human_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,sha
             return
     
 
-def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,shared_q):
+def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,shared_q,lock):
     print(rank)
     board_max = args.board_max
     
     from agent import Agent_MCTS
-    agent = Agent_MCTS(args,5,200,self_play,shared_lr_mul,shared_g_cnt)
+    agent = Agent_MCTS(args,5,100,self_play,shared_lr_mul,shared_g_cnt)
     from checkerboard import Checkerboard, BoardRender
     board = Checkerboard(board_max,args.n_rows)
     board_render = BoardRender(board_max,render_off=True,inline_draw=False)
@@ -102,7 +106,9 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
     Tentropy =[]
     try:
         for episode in range(10000):
+            lock.acquire()
             agent.model_update(share_model)
+            lock.release()
             
             random.seed(time.time())
             board.reset()
@@ -156,13 +162,14 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
             
             episode += 1
     except:
+        lock.release()
         print('except end')
-        
 
 
-def learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q):
+
+def learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q,lock):
     from model import PolicyValueNet
-    epochs = 2
+    epochs = 1
     kl_targ = 0.025
     lr_multiplier = shared_lr_mul  # adaptively adjust the learning rate based on KL
     g_cnt = shared_g_cnt
@@ -215,25 +222,29 @@ def learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q):
                 print('extend')
                 data_buffer.extend(shared_q.get())
             
-            if len(data_buffer) > args.batch_size:
-                print('learn')
+            if len(data_buffer) > args.learn_start:
                 loss, entropy = learn(policy_value_net,0,data_buffer)
+                lock.acquire()
                 share_model.load_state_dict(policy_value_net.policy_value_net.state_dict())
+                lock.release()
+            else:
+                print('buffer fill :',len(data_buffer) ,'>',args.learn_start)
                 
             if shared_g_cnt.value%1000 ==0:
                 print('leanr_save')
                 torch.save(policy_value_net.policy_value_net.state_dict(),'./net_param')
-            time.sleep(1)
+            time.sleep(0.2)
     #                    list_loss.append(loss)
     #                    list_entropy.append(entropy)
     #                print('loss : ',loss,' entropy : ',entropy)
     except:
         torch.save(policy_value_net.policy_value_net.state_dict(),'./net_param')
+        lock.release()
         print('except save')
 
 if __name__ == '__main__':
     
-    board_max = 7
+    board_max = 6
     n_rows = 4
     
     
@@ -259,8 +270,8 @@ if __name__ == '__main__':
 #    parser.add_argument('--V-min', type=float, default=-10, metavar='V', help='Minimum of value distribution support')
 #    parser.add_argument('--V-max', type=float, default=10, metavar='V', help='Maximum of value distribution support')
     #parser.add_argument('--model', type=str, metavar='PARAMS', help='Pretrained model (state dict)')
-    parser.add_argument('--memory-capacity', type=int, default=3000000, metavar='CAPACITY', help='Experience replay memory capacity')
-#    parser.add_argument('--learn-start', type=int, default=1 , metavar='STEPS', help='Number of steps before starting training')
+    parser.add_argument('--memory-capacity', type=int, default=5000000, metavar='CAPACITY', help='Experience replay memory capacity')
+    parser.add_argument('--learn-start', type=int, default=10000 , metavar='STEPS', help='Number of steps before starting training')
 #    parser.add_argument('--replay-interval', type=int, default=1, metavar='k', help='Frequency of sampling from memory')
 #    parser.add_argument('--priority-exponent', type=float, default=0.5, metavar='ω', help='Prioritised experience replay exponent')
 #    parser.add_argument('--priority-weight', type=float, default=0.4, metavar='β', help='Initial prioritised experience replay importance sampling weight')
@@ -283,7 +294,7 @@ if __name__ == '__main__':
     # Setup
     args = parser.parse_args()
     " disable cuda "
-    args.disable_cuda = False
+    args.disable_cuda = True
         
     print(' ' * 26 + 'Options')
     for k, v in vars(args).items():
@@ -302,10 +313,12 @@ if __name__ == '__main__':
     
     share_model = Net(args.board_max, args.board_max)
     share_model.share_memory()
+    lock = Lock()
+    
 #    share_model.cuda()
     shared_lr_mul = Value('d',1)
     shared_g_cnt = Value('i',1)
-    shared_q = Queue(maxsize=10000)
+    shared_q = Queue(maxsize=1000)
     
     try:
         share_model.load_state_dict(torch.load('./net_param'))
@@ -314,23 +327,23 @@ if __name__ == '__main__':
         print('load fail')
      
     processes = []
-
-
-    num_processes = 3
+    
+#    human_process(args,share_model,0,self_play,shared_lr_mul,shared_g_cnt,shared_q,lock)
+    
+    num_processes = 11
     for rank in range(num_processes):
-        p = mp.Process(target=act_process, args=(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,shared_q))
+        p = mp.Process(target=act_process, args=(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,shared_q,lock))
         p.start()
         processes.append(p)
     try:
-#        act_process(args,share_model,0,self_play,shared_lr_mul,shared_g_cnt,shared_q)
-        learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q)
+#        act_process(args,share_model,0,self_play,shared_lr_mul,shared_g_cnt,shared_q,lock)
+        learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q,lock)
     except:
         shared_q.close()
-        shared_q.join_thread()
+        #shared_q.join_thread()
         for ps in processes:
-            ps.terminate()
+            ps.kill()
             
         
-#    human_process(args,share_model,0,self_play,shared_lr_mul,shared_g_cnt,shared_q)
     
     

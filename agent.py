@@ -236,7 +236,14 @@ class Agent_MCTS(nn.Module):
             move_probs[list(acts)] = probs         
             if self._is_selfplay:
                 # add Dirichlet Noise for exploration (needed for self-play training)
-                move = np.random.choice(acts, p=0.75*probs + 0.25*np.random.dirichlet(0.3*np.ones(len(probs))))    
+                if random.random() >0.3:
+                    move = np.random.choice(sensible_moves)
+                else:
+#                move = np.random.choice(acts, p=0.7*probs + 0.3*np.random.dirichlet(0.3*np.ones(len(probs))))  
+#                    move = np.random.choice(acts, p=probs)  
+                    move = acts[np.argmax(probs)]
+                    
+                
                 self.mcts.update_with_move(move) # update the root node and reuse the search tree
             else:
                 # with the default temp=1e-3, thisZ is almost equivalent to choosing the move with the highest prob
