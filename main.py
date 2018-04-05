@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-'test ggg'
 import random
 import numpy as np
 import time
@@ -163,7 +162,6 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
             
             episode += 1
     except:
-        lock.release()
         print('except end')
 
 
@@ -240,7 +238,6 @@ def learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q,lock):
     #                print('loss : ',loss,' entropy : ',entropy)
     except:
         torch.save(policy_value_net.policy_value_net.state_dict(),'./net_param')
-        lock.release()
         print('except save')
 
 if __name__ == '__main__':
@@ -341,9 +338,10 @@ if __name__ == '__main__':
         learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q,lock)
     except:
         shared_q.close()
-        #shared_q.join_thread()
+        shared_q.join_thread()
         for ps in processes:
-            ps.kill()
+	    ps.terminate()
+	    ps.join()	
             
         
     
