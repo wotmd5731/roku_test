@@ -22,7 +22,7 @@ X - MCTS
 #"""
 #define test function
 #"""
-from plot import _plot_line
+#from plot import _plot_line
 def get_equi_data(play_data,board_height,board_width):
     """
     augment the data set by rotation and flipping
@@ -49,9 +49,8 @@ def human_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,sha
     board_max = args.board_max
     from agent import Agent_MCTS
     agent = Agent_MCTS(args,5,800,self_play,shared_lr_mul,shared_g_cnt)
-    lock.acquire()
-    agent.model_update(share_model)
-    lock.release()
+    with lock:
+        agent.model_update(share_model)
             
     from checkerboard import Checkerboard, BoardRender
     board = Checkerboard(board_max,args.n_rows)
@@ -98,7 +97,7 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
     agent = Agent_MCTS(args,5,100,self_play,shared_lr_mul,shared_g_cnt)
     from checkerboard import Checkerboard, BoardRender
     board = Checkerboard(board_max,args.n_rows)
-    board_render = BoardRender(board_max,render_off=True,inline_draw=False)
+    board_render = BoardRender(board_max,render_off=False,inline_draw=False)
     board_render.clear()
     
     Ts =[]
@@ -106,9 +105,8 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
     Tentropy =[]
     try:
         for episode in range(10000):
-            lock.acquire()
-            agent.model_update(share_model)
-            lock.release()
+            with lock:
+                agent.model_update(share_model)
             
             random.seed(time.time())
             board.reset()
@@ -221,18 +219,17 @@ def learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q,lock):
                 print('extend')
                 data_buffer.extend(shared_q.get())
             
-            if len(data_buffer) > args.learn_start:
-                loss, entropy = learn(policy_value_net,0,data_buffer)
-                lock.acquire()
-                share_model.load_state_dict(policy_value_net.policy_value_net.state_dict())
-                lock.release()
+                if len(data_buffer) > args.learn_start:
+                    loss, entropy = learn(policy_value_net,0,data_buffer)
+                    with lock:
+                        share_model.load_state_dict(policy_value_net.policy_value_net.state_dict())
             else:
                 print('buffer fill :',len(data_buffer) ,'>',args.learn_start)
                 
             if shared_g_cnt.value%1000 ==0:
                 print('leanr_save')
                 torch.save(policy_value_net.policy_value_net.state_dict(),'./net_param')
-            time.sleep(0.2)
+            time.sleep(1)
     #                    list_loss.append(loss)
     #                    list_entropy.append(entropy)
     #                print('loss : ',loss,' entropy : ',entropy)
@@ -328,7 +325,7 @@ if __name__ == '__main__':
     
 #    human_process(args,share_model,0,self_play,shared_lr_mul,shared_g_cnt,shared_q,lock)
     
-    num_processes = 11
+    num_processes = 2
     for rank in range(num_processes):
         p = mp.Process(target=act_process, args=(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,shared_q,lock))
         p.start()
@@ -340,8 +337,8 @@ if __name__ == '__main__':
         shared_q.close()
         shared_q.join_thread()
         for ps in processes:
-	    ps.terminate()
-	    ps.join()	
+            ps.terminate()
+            ps.join()	
             
         
     
