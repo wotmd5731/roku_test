@@ -14,6 +14,7 @@ import datetime
 from collections import defaultdict, deque
 import sys
 import os 
+import pickle
 
 import argparse
 """
@@ -97,7 +98,7 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
     agent = Agent_MCTS(args,5,100,self_play,shared_lr_mul,shared_g_cnt)
     from checkerboard import Checkerboard, BoardRender
     board = Checkerboard(board_max,args.n_rows)
-    board_render = BoardRender(board_max,render_off=False,inline_draw=False)
+    board_render = BoardRender(board_max,render_off=True,inline_draw=False)
     board_render.clear()
     
     Ts =[]
@@ -140,9 +141,9 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
                     #reset MCTS root node
                     agent.reset_player() 
                     if winner != -1:
-                        print("Game end. Winner is player:", winner, 'total_step :',step)
+                        print(rank, "Game end. Winner is player:", winner, 'total_step :',step)
                     else:
-                        print("Game end. Tie", 'total_step :',step)
+                        print(rank, "Game end. Tie", 'total_step :',step)
     #                return winner, zip(states, mcts_probs, winners_z)
                     play_data = zip(states, mcts_probs, winners_z)
                     ex_play_data = get_equi_data(play_data,board_max,board_max)
@@ -160,7 +161,7 @@ def act_process(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,share
             
             episode += 1
     except:
-        print('except end')
+        print(rank,'except end')
 
 
 
@@ -174,7 +175,9 @@ def learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q,lock):
     batch_size = args.batch_size # mini-batch size for training
     policy_value_net = PolicyValueNet(args.board_max,args.board_max,use_gpu=args.cuda)
     policy_value_net.policy_value_net.load_state_dict(share_model.state_dict())
-    
+    with open('qqq.dat','rb') as qq:
+        data_buffer = pickle.load(qq)
+        print('load buffer length: ',len(data_buffer))
     
     def learn(policy_value_net,rank,data_buffer):
         """update the policy-value net"""
@@ -212,11 +215,13 @@ def learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q,lock):
     
     print('learner')
 
-    data_buffer = deque(maxlen=args.memory_capacity)
+#    data_buffer = deque(maxlen=args.memory_capacity)
+    
+            
     try:
         while True:      
             if not shared_q.empty():
-                print('extend')
+                print('extend',len(data_buffer) ,'>',args.learn_start)
                 data_buffer.extend(shared_q.get())
             
                 if len(data_buffer) > args.learn_start:
@@ -235,7 +240,10 @@ def learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q,lock):
     #                print('loss : ',loss,' entropy : ',entropy)
     except:
         torch.save(policy_value_net.policy_value_net.state_dict(),'./net_param')
-        print('except save')
+        with open('qqq.dat','wb') as qq:
+            pickle.dump(data_buffer,qq,-1)
+            print('pickle dump')
+        print(999,'except save')
 
 if __name__ == '__main__':
     
@@ -265,8 +273,8 @@ if __name__ == '__main__':
 #    parser.add_argument('--V-min', type=float, default=-10, metavar='V', help='Minimum of value distribution support')
 #    parser.add_argument('--V-max', type=float, default=10, metavar='V', help='Maximum of value distribution support')
     #parser.add_argument('--model', type=str, metavar='PARAMS', help='Pretrained model (state dict)')
-    parser.add_argument('--memory-capacity', type=int, default=5000000, metavar='CAPACITY', help='Experience replay memory capacity')
-    parser.add_argument('--learn-start', type=int, default=10000 , metavar='STEPS', help='Number of steps before starting training')
+    parser.add_argument('--memory-capacity', type=int, default=1000000, metavar='CAPACITY', help='Experience replay memory capacity')
+    parser.add_argument('--learn-start', type=int, default=900000 , metavar='STEPS', help='Number of steps before starting training')
 #    parser.add_argument('--replay-interval', type=int, default=1, metavar='k', help='Frequency of sampling from memory')
 #    parser.add_argument('--priority-exponent', type=float, default=0.5, metavar='ω', help='Prioritised experience replay exponent')
 #    parser.add_argument('--priority-weight', type=float, default=0.4, metavar='β', help='Initial prioritised experience replay importance sampling weight')
@@ -313,7 +321,7 @@ if __name__ == '__main__':
 #    share_model.cuda()
     shared_lr_mul = Value('d',1)
     shared_g_cnt = Value('i',1)
-    shared_q = Queue(maxsize=1000)
+    shared_q = Queue(maxsize=10000)
     
     try:
         share_model.load_state_dict(torch.load('./net_param'))
@@ -325,7 +333,7 @@ if __name__ == '__main__':
     
 #    human_process(args,share_model,0,self_play,shared_lr_mul,shared_g_cnt,shared_q,lock)
     
-    num_processes = 2
+    num_processes = 11
     for rank in range(num_processes):
         p = mp.Process(target=act_process, args=(args,share_model,rank,self_play,shared_lr_mul,shared_g_cnt,shared_q,lock))
         p.start()
@@ -334,11 +342,12 @@ if __name__ == '__main__':
 #        act_process(args,share_model,0,self_play,shared_lr_mul,shared_g_cnt,shared_q,lock)
         learn_process(args,share_model,shared_lr_mul,shared_g_cnt,shared_q,lock)
     except:
-        shared_q.close()
-        shared_q.join_thread()
-        for ps in processes:
-            ps.terminate()
-            ps.join()	
+        pass
+#        shared_q.close()
+#        shared_q.join_thread()
+    for ps in processes:
+        ps.terminate()
+        ps.join()	
             
         
     
