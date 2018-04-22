@@ -44,7 +44,7 @@ class Checkerboard():
         self.availables = list(range(self.max_size * self.max_size))
         self.last_move = -1
         self.user_count = 1
-        self.step(self.max_size*self.max_size//2)
+        self.step(self.max_size//2+self.max_size//2*self.max_size)
         
 #        for y in range(self.max_size):
 #            for x in range(self.max_size):
